@@ -4,3 +4,4 @@ google-auth==2.35.0
 google-api-python-client==2.150.0
 pandas==2.2.3
 cryptography>=42.0.0,<44.0.0
+cffi>=1.12,<2.0
