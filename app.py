@@ -1,6 +1,8 @@
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaInMemoryUpload
 import pandas as pd
 from datetime import datetime
 import uuid
@@ -11,84 +13,215 @@ import re
 # ══════════════════════════════════════════════════════════
 RTL_CSS = """
 <style>
-/* כיוון RTL בסיסי */
+@import url('https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700&display=swap');
+
+/* ══ צבעי בסיס ══
+   --salmon:      #E8756A  עיקרי
+   --salmon-dark: #C4565A  hover
+   --blush:       #FEF0EE  רקע כרטיסים
+   --cream:       #FFFBFA  רקע דף
+   --charcoal:    #2C2C2C  טקסט כהה
+   --mid:         #6B5B55  טקסט משני
+   --white:       #FFFFFF
+*/
+
+/* ══ בסיס ══ */
 body, .stApp, [data-testid="stAppViewContainer"],
 [data-testid="stMain"], [data-testid="stForm"] {
+    font-family: 'Rubik', sans-serif !important;
     direction: rtl;
     text-align: right;
+    background-color: #FFFBFA;
 }
+
+/* ══ סרגל צד ══ */
 [data-testid="stSidebar"], [data-testid="stSidebarContent"] {
     direction: rtl;
     text-align: right;
+    background: linear-gradient(180deg, #E8756A 0%, #C4565A 100%) !important;
 }
-/* תוויות שדות */
+[data-testid="stSidebar"] * { color: #ffffff !important; }
+[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.3) !important; }
+
+/* ══ כותרות ══ */
+h1 {
+    font-family: 'Rubik', sans-serif !important;
+    color: #2C2C2C;
+    font-weight: 700;
+    border-bottom: 3px solid #E8756A;
+    padding-bottom: 6px;
+}
+h2, h3 {
+    font-family: 'Rubik', sans-serif !important;
+    color: #2C2C2C;
+    font-weight: 600;
+}
+
+/* ══ תוויות ══ */
 label, .stSelectbox label, .stTextInput label,
-.stTextArea label, .stSlider label, .stRadio label {
+.stTextArea label, .stRadio label {
+    font-family: 'Rubik', sans-serif !important;
     direction: rtl;
     text-align: right;
     width: 100%;
+    color: #2C2C2C !important;
+    font-weight: 500;
 }
-/* כפתורי radio */
-[data-testid="stRadio"] > div { flex-direction: row-reverse; justify-content: flex-end; }
-/* כרטיס קריטריון */
-.criterion-card {
-    background: #f8f9fa;
+
+/* ══ radio דירוג 1-5 ══ */
+[data-testid="stRadio"] > div {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 16px;
+    margin-top: 6px;
+}
+[data-testid="stRadio"] label {
+    font-size: 1.15em !important;
+    font-weight: 600 !important;
+    color: #2C2C2C !important;
+}
+
+/* ══ כפתורים ══ */
+.stButton > button {
+    font-family: 'Rubik', sans-serif !important;
+    background-color: #ffffff;
+    color: #E8756A;
+    border: 2px solid #E8756A;
     border-radius: 10px;
-    padding: 18px 18px 10px 18px;
-    margin-bottom: 18px;
-    border-right: 5px solid #667eea;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+.stButton > button:hover {
+    background-color: #E8756A;
+    color: #ffffff;
+}
+.stButton > button[kind="primary"] {
+    background: #E8756A;
+    color: #ffffff;
+    border: none;
+    font-size: 1.05em;
+    padding: 10px 0;
+    box-shadow: 0 3px 10px rgba(232,117,106,0.35);
+}
+.stButton > button[kind="primary"]:hover {
+    background: #C4565A;
+}
+
+/* ══ סרגל התקדמות מותאם ══ */
+.progress-wrap {
+    background: #F5D6D3;
+    border-radius: 20px;
+    height: 10px;
+    margin: 8px 0 4px 0;
+    overflow: hidden;
+}
+.progress-fill {
+    background: linear-gradient(90deg, #E8756A, #C4565A);
+    height: 100%;
+    border-radius: 20px;
+    transition: width 0.4s ease;
+}
+.progress-label {
+    font-size: 0.9em;
+    color: #6B5B55;
+    margin-bottom: 16px;
+    font-weight: 500;
+}
+
+/* ══ כרטיס קריטריון ══ */
+.criterion-card {
+    background: #ffffff;
+    border-radius: 14px;
+    padding: 22px 22px 14px 22px;
+    border-right: 5px solid #E8756A;
     border-left: none;
+    box-shadow: 0 2px 10px rgba(232,117,106,0.12);
 }
-/* עוגני דרגות */
-.anchor-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.82em;
-    margin-top: 8px;
+
+/* ══ עוגני דרגות — רשימה אנכית ══ */
+.anchor-list {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.anchor-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 0.85em;
     color: #555;
+    direction: rtl;
 }
-.anchor-table th {
-    background: #e2e8f0;
-    padding: 4px 8px;
-    text-align: center;
-    border: 1px solid #cbd5e0;
+.anchor-num {
+    background: #E8756A;
+    color: #ffffff;
+    font-weight: 700;
+    border-radius: 50%;
+    min-width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 0.85em;
 }
-.anchor-table td {
-    padding: 4px 8px;
-    border: 1px solid #e2e8f0;
-    vertical-align: top;
-    text-align: right;
+.anchor-row:nth-child(2) .anchor-num,
+.anchor-row:nth-child(4) .anchor-num {
+    background: #ddd;
+    color: #999;
 }
-/* הודעת הצלחה מותאמת */
+.anchor-text {
+    padding-top: 2px;
+    line-height: 1.4;
+}
+
+/* ══ הצלחה ══ */
 .success-banner {
-    background: linear-gradient(135deg, #48bb78, #38a169);
-    color: white;
-    border-radius: 8px;
-    padding: 16px;
-    text-align: center;
-    font-size: 1.1em;
-    font-weight: bold;
-    margin: 12px 0;
-}
-/* כרטיס מועמד */
-.candidate-header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #E8756A, #C4565A);
     color: white;
     border-radius: 12px;
     padding: 20px;
+    text-align: center;
+    font-size: 1.2em;
+    font-weight: 700;
+    margin: 16px 0;
+    box-shadow: 0 4px 14px rgba(232,117,106,0.35);
+}
+
+/* ══ כרטיס מועמד (תוצאות) ══ */
+.candidate-header {
+    background: linear-gradient(135deg, #E8756A 0%, #C4565A 100%);
+    color: white;
+    border-radius: 14px;
+    padding: 20px;
     margin-bottom: 18px;
 }
-/* dataframe ל-RTL */
+
+/* ══ dataframe ══ */
 [data-testid="stDataFrame"] { direction: rtl; }
-/* קונטיינר תמונה */
-.photo-frame {
-    border-radius: 8px;
-    overflow: hidden;
-    border: 3px solid #667eea;
-    display: inline-block;
-}
-/* טאבים */
+
+/* ══ טאבים ══ */
 [data-testid="stTabs"] { direction: rtl; }
+[data-testid="stTab"] {
+    font-family: 'Rubik', sans-serif !important;
+    font-weight: 600;
+}
+
+/* ══ התראות ══ */
+[data-testid="stAlert"] {
+    direction: rtl;
+    text-align: right;
+    font-family: 'Rubik', sans-serif !important;
+}
+
+/* ══ מפריד ══ */
+hr { border-color: #F5D6D3; }
+
+input, textarea {
+    font-family: 'Rubik', sans-serif !important;
+    direction: rtl !important;
+}
 </style>
 """
 
@@ -120,7 +253,7 @@ CRITERIA = [
         "anchors": {
             1: "לא מגלה עניין, לא שואל.",
             3: "מתעניין, שואל שאלות, משתלב.",
-            5: 'מגיע עם ידע מקדים, לומד יזום, "ספוג".',
+            5: "מגיע עם ידע מקדים, לומד ביוזמתו, שואל שאלות עמוקות.",
         },
     },
     {
@@ -129,7 +262,7 @@ CRITERIA = [
         "anchors": {
             1: "חיכוכים, תקשורת לקויה תחת לחץ.",
             3: "תקשורת טובה עם הצוות והיולדות, רגוע.",
-            5: "מגביר את הצוות סביבו, אמפתי ומכבד, נעים לעבוד איתו.",
+            5: "משפיע לטובה על האנשים סביבו, אמפתי ומכבד, נעים לעבוד איתו.",
         },
     },
     {
@@ -172,21 +305,16 @@ def drive_url_to_direct(url: str) -> str:
     return url
 
 
-def render_anchor_table(anchors: dict) -> str:
-    return f"""
-    <table class="anchor-table">
-      <tr>
-        <th style="width:33%">דרגה 1</th>
-        <th style="width:34%">דרגה 3</th>
-        <th style="width:33%">דרגה 5</th>
-      </tr>
-      <tr>
-        <td>{anchors[1]}</td>
-        <td>{anchors[3]}</td>
-        <td>{anchors[5]}</td>
-      </tr>
-    </table>
-    """
+def _option_label(n: int, anchors: dict) -> str:
+    text = anchors.get(n, "")
+    return f"{n} — {text}" if text else str(n)
+
+
+def _option_to_int(s) -> int:
+    try:
+        return int(str(s).strip().split()[0])
+    except Exception:
+        return 3
 
 
 # ══════════════════════════════════════════════════════════
@@ -208,6 +336,31 @@ def _get_gc():
 def _get_spreadsheet():
     gc = _get_gc()
     return gc.open_by_key(st.secrets["sheet_id"])
+
+
+@st.cache_resource
+def _get_drive_service():
+    creds = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]),
+        scopes=["https://www.googleapis.com/auth/drive"],
+    )
+    return build("drive", "v3", credentials=creds)
+
+
+def upload_photo_to_drive(file_bytes: bytes, filename: str, mime_type: str) -> str:
+    """מעלה תמונה ל-Drive ומחזירה URL ישיר לתצוגה."""
+    service = _get_drive_service()
+    media = MediaInMemoryUpload(file_bytes, mimetype=mime_type, resumable=False)
+    file_meta = {"name": filename}
+    uploaded = service.files().create(
+        body=file_meta, media_body=media, fields="id"
+    ).execute()
+    file_id = uploaded.get("id")
+    service.permissions().create(
+        fileId=file_id,
+        body={"type": "anyone", "role": "reader"},
+    ).execute()
+    return f"https://drive.google.com/uc?export=view&id={file_id}"
 
 
 def _spreadsheet():
@@ -324,7 +477,7 @@ def _clear_caches():
 # ══════════════════════════════════════════════════════════
 #  כתיבת נתונים
 # ══════════════════════════════════════════════════════════
-def add_committee(name: str, date) -> str | bool:
+def add_committee(name: str, date):
     ws = _ws("committees", ["committee_id", "name", "date", "active"])
     if ws is None:
         return False
@@ -335,6 +488,24 @@ def add_committee(name: str, date) -> str | bool:
         return cid
     except Exception as e:
         st.error(f"שגיאה ביצירת ועדה: {e}")
+        return False
+
+
+def update_committee(committee_id: str, new_name: str, new_date):
+    ws = _ws("committees", ["committee_id", "name", "date", "active"])
+    if ws is None:
+        return False
+    try:
+        rows = ws.get_all_records()
+        for i, row in enumerate(rows, start=2):
+            if str(row["committee_id"]) == str(committee_id):
+                ws.update_cell(i, 2, new_name)
+                ws.update_cell(i, 3, str(new_date))
+                load_committees.clear()
+                return True
+        return False
+    except Exception as e:
+        st.error(f"שגיאה בעדכון ועדה: {e}")
         return False
 
 
@@ -353,7 +524,7 @@ def set_committee_active(committee_id: str, active: bool):
         st.error(f"שגיאה בעדכון ועדה: {e}")
 
 
-def add_candidate(committee_id: str, name: str, photo_url: str) -> str | bool:
+def add_candidate(committee_id: str, name: str, photo_url: str):
     ws = _ws("candidates", ["candidate_id", "committee_id", "name", "photo_url", "active"])
     if ws is None:
         return False
@@ -382,7 +553,7 @@ def set_candidate_active(candidate_id: str, active: bool):
         st.error(f"שגיאה בעדכון מועמד: {e}")
 
 
-def submit_rating(committee_id, candidate_id, rater_name, ratings: dict, note: str) -> str:
+def submit_rating(committee_id, candidate_id, rater_name, ratings: dict, note: str):
     """שומר או מעדכן הזנה. מחזיר 'created'/'updated'/False."""
     ws = _ws("submissions", [
         "timestamp", "committee_id", "candidate_id", "rater_name",
@@ -418,6 +589,57 @@ def submit_rating(committee_id, candidate_id, rater_name, ratings: dict, note: s
         return False
 
 
+def delete_submissions_for_committee(committee_id: str) -> int:
+    """מוחקת את כל ההזנות לוועדה נתונה. מחזירה מספר שורות שנמחקו."""
+    ws = _ws("submissions", [
+        "timestamp", "committee_id", "candidate_id", "rater_name",
+        "initiative", "responsibility", "motivation", "communication",
+        "fit_work", "fit_social", "note",
+    ])
+    if ws is None:
+        return 0
+    try:
+        rows = ws.get_all_values()  # כולל כותרת בשורה 1
+        to_delete = [
+            i + 2  # +2: שורה 1 היא כותרת, enumerate מתחיל ב-0
+            for i, row in enumerate(rows[1:])
+            if len(row) > 1 and str(row[1]) == str(committee_id)
+        ]
+        # מוחקים מהסוף להתחלה כדי לא לשבש אינדקסים
+        for row_num in reversed(to_delete):
+            ws.delete_rows(row_num)
+        load_submissions.clear()
+        return len(to_delete)
+    except Exception as e:
+        st.error(f"שגיאה במחיקה: {e}")
+        return 0
+
+
+def delete_single_submission(committee_id: str, candidate_id: str, rater_name: str) -> bool:
+    """מוחקת הזנה בודדת לפי ועדה + מועמד + מדרג."""
+    ws = _ws("submissions", [
+        "timestamp", "committee_id", "candidate_id", "rater_name",
+        "initiative", "responsibility", "motivation", "communication",
+        "fit_work", "fit_social", "note",
+    ])
+    if ws is None:
+        return False
+    try:
+        rows = ws.get_all_values()
+        for i, row in enumerate(rows[1:], start=2):
+            if (len(row) >= 4
+                    and str(row[1]) == str(committee_id)
+                    and str(row[2]) == str(candidate_id)
+                    and str(row[3]).strip().lower() == rater_name.strip().lower()):
+                ws.delete_rows(i)
+                load_submissions.clear()
+                return True
+        return False
+    except Exception as e:
+        st.error(f"שגיאה במחיקה: {e}")
+        return False
+
+
 def existing_submission(committee_id, candidate_id, rater_name):
     """מחזיר שורת הזנה קיימת או None."""
     subs = load_submissions()
@@ -437,139 +659,173 @@ def existing_submission(committee_id, candidate_id, rater_name):
 #  מסך 1 — הזנה (פתוח לכולם)
 # ══════════════════════════════════════════════════════════
 def page_entry():
-    st.title("הערכת מועמד לוועדת קבלה")
+    col_logo, col_title = st.columns([1, 5])
+    with col_logo:
+        try:
+            st.image("images.png", width=90)
+        except Exception:
+            pass
+    with col_title:
+        st.title("הערכת מועמד לוועדת קבלה")
 
-    # טעינת ועדות פעילות
+    # ── ועדות פעילות ──
     committees = load_committees()
     active = committees[committees["active"]] if not committees.empty else pd.DataFrame()
-
     if active.empty:
         st.warning("אין ועדות פעילות כרגע. פנו למנהל המערכת.")
         return
 
-    # בורר ועדה
     if len(active) == 1:
         comm = active.iloc[0]
         st.info(f"**ועדה פעילה:** {comm['name']}  |  {comm['date']}")
     else:
         opts = {f"{r['name']} ({r['date']})": r["committee_id"] for _, r in active.iterrows()}
         chosen = st.selectbox("בחרי ועדה", list(opts.keys()))
-        cid_sel = opts[chosen]
-        comm = active[active["committee_id"] == cid_sel].iloc[0]
+        comm = active[active["committee_id"] == opts[chosen]].iloc[0]
 
     committee_id = comm["committee_id"]
-
     st.markdown("---")
 
-    # שם מדרג
-    rater_name = st.text_input(
-        "שמך (חובה)",
-        placeholder="הכניסי את שמך המלא",
-        key="rater_name_input",
-    )
+    # ── שם מדרג ──
+    rater_name = st.text_input("שמך (חובה)", placeholder="הכניסי את שמך המלא", key="rater_name_input")
 
-    # מועמדים בוועדה
+    # ── מועמדים ──
     candidates = load_candidates()
     comm_candidates = (
-        candidates[
-            (candidates["committee_id"] == committee_id) & (candidates["active"])
-        ]
-        if not candidates.empty
-        else pd.DataFrame()
+        candidates[(candidates["committee_id"] == committee_id) & candidates["active"]]
+        if not candidates.empty else pd.DataFrame()
     )
-
     if comm_candidates.empty:
-        st.warning("אין מועמדים פעילים בוועדה זו. פנו למנהל המערכת.")
+        st.warning("אין מועמדים פעילים בוועדה זו.")
         return
 
-    cand_names = comm_candidates["name"].tolist()
-    selected_name = st.selectbox("בחרי מועמד לדירוג", cand_names, key="cand_select")
+    selected_name = st.selectbox("בחרי מועמד לדירוג", comm_candidates["name"].tolist(), key="cand_select")
     candidate = comm_candidates[comm_candidates["name"] == selected_name].iloc[0]
     candidate_id = candidate["candidate_id"]
 
     # תמונה
-    photo_raw = candidate.get("photo_url", "")
-    photo_url = drive_url_to_direct(str(photo_raw)) if photo_raw else ""
+    photo_url = drive_url_to_direct(str(candidate.get("photo_url", "") or ""))
     if photo_url:
-        col_img, col_name = st.columns([1, 4])
+        col_img, col_nm = st.columns([1, 4])
         with col_img:
             try:
-                st.image(photo_url, width=110)
+                st.image(photo_url, width=100)
             except Exception:
                 pass
-        with col_name:
+        with col_nm:
             st.markdown(f"### {selected_name}")
     else:
         st.markdown(f"### {selected_name}")
 
-    # בדיקת הזנה קיימת
+    # ── איפוס שלב כשמחליפים מועמד/ועדה ──
+    ctx = f"{committee_id}__{candidate_id}"
+    if st.session_state.get("_entry_ctx") != ctx:
+        st.session_state._entry_ctx = ctx
+        st.session_state._entry_step = 0
+        existing = existing_submission(committee_id, candidate_id, rater_name) if rater_name.strip() else None
+        for crit in CRITERIA:
+            default_int = 3
+            if existing is not None:
+                try:
+                    default_int = int(existing[crit["key"]])
+                except Exception:
+                    pass
+            st.session_state[f"sl_{crit['key']}"] = _option_label(default_int, crit["anchors"])
+        st.session_state._entry_note = (
+            str(existing["note"]) if existing is not None and pd.notna(existing.get("note")) else ""
+        )
+
+    # בדיקת הזנה קיימת (לתצוגה בלבד)
     existing = None
     if rater_name.strip():
         existing = existing_submission(committee_id, candidate_id, rater_name)
-
     if existing is not None:
-        st.warning("⚠️ כבר הזנת הערכה על מועמד זה. השינויים ישמרו כעדכון.")
+        st.warning("⚠️ כבר הזנת הערכה על מועמד זה — השינויים ישמרו כעדכון.")
 
     st.markdown("---")
-    st.subheader("דירוג קריטריונים")
 
-    ratings = {}
-    for crit in CRITERIA:
-        key    = crit["key"]
-        label  = crit["label"]
-        anchors = crit["anchors"]
+    # ══ סרגל התקדמות ══
+    TOTAL = len(CRITERIA)
+    step = st.session_state.get("_entry_step", 0)
+    pct = int((step / TOTAL) * 100)
 
-        default = 3
-        if existing is not None:
-            try:
-                default = int(existing[key])
-            except (KeyError, ValueError, TypeError):
-                default = 3
-
-        st.markdown(f'<div class="criterion-card">', unsafe_allow_html=True)
-        st.markdown(f"**{label}**")
-        rating = st.slider(
-            label,
-            min_value=1,
-            max_value=5,
-            value=default,
-            label_visibility="collapsed",
-            key=f"sl_{key}",
-        )
-        st.markdown(render_anchor_table(anchors), unsafe_allow_html=True)
-        ratings[key] = rating
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    # הערה חופשית
-    default_note = str(existing["note"]) if existing is not None and pd.notna(existing.get("note")) else ""
-    note = st.text_area(
-        "הערה חופשית (אופציונלי)",
-        value=default_note,
-        placeholder="הוסיפי כל הערה שתרצי...",
-        key="free_note",
+    st.markdown(
+        f'<div class="progress-wrap"><div class="progress-fill" style="width:{pct}%"></div></div>'
+        f'<div class="progress-label">קריטריון {step + 1} מתוך {TOTAL}</div>',
+        unsafe_allow_html=True,
     )
 
+    # ══ קריטריון נוכחי ══
+    crit = CRITERIA[step]
+    options = [_option_label(n, crit["anchors"]) for n in [1, 2, 3, 4, 5]]
+
+    st.markdown('<div class="criterion-card">', unsafe_allow_html=True)
+    st.radio(
+        f"### {crit['label']}",
+        options=options,
+        key=f"sl_{crit['key']}",
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # הערה — בשלב האחרון
+    if step == TOTAL - 1:
+        st.markdown("---")
+        note_val = st.text_area(
+            "הערה חופשית (אופציונלי)",
+            value=st.session_state.get("_entry_note", ""),
+            placeholder="הוסיפי כל הערה שתרצי...",
+            key="_entry_note_input",
+        )
+        st.session_state._entry_note = note_val
+
     st.markdown("---")
-    if st.button("שלחי הערכה", type="primary", use_container_width=True):
-        if not rater_name.strip():
-            st.error("יש להכניס שם לפני שליחה.")
+
+    # ══ ניווט ══
+    col_back, col_spacer, col_next = st.columns([2, 1, 2])
+
+    with col_back:
+        if step > 0:
+            if st.button("← הקריטריון הקודם", use_container_width=True):
+                st.session_state._entry_step = step - 1
+                st.rerun()
+
+    with col_next:
+        if step < TOTAL - 1:
+            if st.button("הקריטריון הבא →", type="primary", use_container_width=True):
+                st.session_state._entry_step = step + 1
+                st.rerun()
         else:
-            result = submit_rating(committee_id, candidate_id, rater_name.strip(), ratings, note)
-            if result == "created":
-                st.markdown(
-                    f'<div class="success-banner">ההערכה על {selected_name} נשמרה בהצלחה ✓</div>',
-                    unsafe_allow_html=True,
-                )
-                st.balloons()
-            elif result == "updated":
-                st.success(f"ההערכה על {selected_name} עודכנה בהצלחה ✓")
+            if st.button("שלחי הערכה ✓", type="primary", use_container_width=True):
+                if not rater_name.strip():
+                    st.error("יש להכניס שם לפני שליחה.")
+                else:
+                    ratings = {c["key"]: _option_to_int(st.session_state.get(f"sl_{c['key']}", "3")) for c in CRITERIA}
+                    note = st.session_state.get("_entry_note", "")
+                    result = submit_rating(committee_id, candidate_id, rater_name.strip(), ratings, note)
+                    if result == "created":
+                        st.markdown(
+                            f'<div class="success-banner">ההערכה על {selected_name} נשמרה בהצלחה ✓</div>',
+                            unsafe_allow_html=True,
+                        )
+                        st.balloons()
+                        st.session_state._entry_step = 0
+                    elif result == "updated":
+                        st.success(f"ההערכה על {selected_name} עודכנה בהצלחה ✓")
+                        st.session_state._entry_step = 0
 
 
 # ══════════════════════════════════════════════════════════
 #  מסך 2 — תוצאות (נעול בסיסמה)
 # ══════════════════════════════════════════════════════════
 def page_results():
-    st.title("תוצאות ודירוג")
+    col_logo, col_title = st.columns([1, 5])
+    with col_logo:
+        try:
+            st.image("images.png", width=90)
+        except Exception:
+            pass
+    with col_title:
+        st.title("תוצאות ודירוג")
 
     # אימות
     if not st.session_state.get("auth_ok"):
@@ -784,7 +1040,7 @@ def _tab_card(candidates: pd.DataFrame, submissions: pd.DataFrame):
 # ── לשונית ניהול ────────────────────────────────────────
 def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, committee_id: str):
     st.subheader("ניהול")
-    tab_c, tab_k = st.tabs(["ועדות", "מועמדים"])
+    tab_c, tab_k, tab_del = st.tabs(["ועדות", "מועמדים", "מחיקת הזנות"])
 
     with tab_c:
         st.markdown("#### יצירת ועדה חדשה")
@@ -804,17 +1060,45 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
         st.markdown("#### ועדות קיימות")
         if not committees.empty:
             for _, comm in committees.iterrows():
-                c1, c2, c3 = st.columns([3, 1, 1])
+                cid = comm["committee_id"]
+                c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
                 with c1:
                     st.markdown(f"**{comm['name']}** ({comm['date']})")
                 with c2:
                     st.markdown("✅ פעילה" if comm["active"] else "🔒 סגורה")
                 with c3:
                     lbl = "סגרי" if comm["active"] else "הפעילי"
-                    if st.button(lbl, key=f"tog_{comm['committee_id']}"):
-                        set_committee_active(comm["committee_id"], not comm["active"])
+                    if st.button(lbl, key=f"tog_{cid}"):
+                        set_committee_active(cid, not comm["active"])
                         _clear_caches()
                         st.rerun()
+                with c4:
+                    if st.button("ערכי", key=f"edit_btn_{cid}"):
+                        st.session_state[f"editing_{cid}"] = True
+
+                # טופס עריכה — נפתח בלחיצה
+                if st.session_state.get(f"editing_{cid}"):
+                    with st.form(f"edit_form_{cid}"):
+                        st.markdown(f"**עריכת ועדה:** {comm['name']}")
+                        edited_name = st.text_input("שם חדש", value=comm["name"])
+                        try:
+                            from datetime import date as date_type
+                            current_date = date_type.fromisoformat(str(comm["date"]))
+                        except Exception:
+                            current_date = None
+                        edited_date = st.date_input("תאריך חדש", value=current_date)
+                        col_save, col_cancel = st.columns(2)
+                        with col_save:
+                            if st.form_submit_button("שמרי"):
+                                if edited_name.strip():
+                                    update_committee(cid, edited_name.strip(), edited_date)
+                                    st.session_state[f"editing_{cid}"] = False
+                                    st.success("הוועדה עודכנה.")
+                                    st.rerun()
+                        with col_cancel:
+                            if st.form_submit_button("בטלי"):
+                                st.session_state[f"editing_{cid}"] = False
+                                st.rerun()
 
     with tab_k:
         if not committee_id:
@@ -823,13 +1107,31 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
 
         st.markdown("#### הוספת מועמד לוועדה הנוכחית")
         with st.form("form_new_cand"):
-            cand_name  = st.text_input("שם מלא")
-            cand_photo = st.text_input("קישור לתמונה מ-Google Drive (אופציונלי)")
+            cand_name    = st.text_input("שם מלא")
+            uploaded_img = st.file_uploader(
+                "תמונת מועמד (אופציונלי)",
+                type=["png", "jpg", "jpeg"],
+                help="גררי קובץ או לחצי לבחירה",
+            )
+            if uploaded_img:
+                st.image(uploaded_img, width=120, caption="תצוגה מקדימה")
+
             if st.form_submit_button("הוסיפי מועמד"):
                 if cand_name.strip():
-                    cid = add_candidate(committee_id, cand_name.strip(), cand_photo.strip())
+                    photo_url = ""
+                    if uploaded_img:
+                        with st.spinner("מעלה תמונה..."):
+                            try:
+                                photo_url = upload_photo_to_drive(
+                                    uploaded_img.read(),
+                                    uploaded_img.name,
+                                    uploaded_img.type,
+                                )
+                            except Exception as e:
+                                st.warning(f"התמונה לא הועלתה: {e}")
+                    cid = add_candidate(committee_id, cand_name.strip(), photo_url)
                     if cid:
-                        st.success(f"מועמד נוסף (מזהה: {cid})")
+                        st.success(f"מועמד נוסף{'עם תמונה' if photo_url else ''} ✓")
                         _clear_caches()
                         st.rerun()
                 else:
@@ -856,6 +1158,63 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
                             set_candidate_active(cand["candidate_id"], True)
                             _clear_caches()
                             st.rerun()
+
+    with tab_del:
+        st.markdown("#### מחיקת הזנות")
+        if not committee_id:
+            st.info("בחרי ועדה תחילה.")
+        else:
+            subs = load_submissions()
+            comm_subs = (
+                subs[subs["committee_id"] == str(committee_id)]
+                if not subs.empty else pd.DataFrame()
+            )
+            all_cands = load_candidates()
+
+            if comm_subs.empty:
+                st.info("אין הזנות לוועדה זו.")
+            else:
+                st.markdown(f"סה\"כ הזנות בוועדה: **{len(comm_subs)}**")
+
+                # מחיקת הזנה בודדת
+                st.markdown("---")
+                st.markdown("**מחיקת הזנה בודדת:**")
+                if not all_cands.empty:
+                    cmap = dict(zip(all_cands["candidate_id"], all_cands["name"]))
+                    comm_subs = comm_subs.copy()
+                    comm_subs["שם מועמד"] = comm_subs["candidate_id"].map(cmap)
+
+                display_options = [
+                    f"{row.get('שם מועמד', row['candidate_id'])} — {row['rater_name']} ({row.get('timestamp','')})"
+                    for _, row in comm_subs.iterrows()
+                ]
+                if display_options:
+                    chosen_idx = st.selectbox(
+                        "בחרי הזנה למחיקה",
+                        range(len(display_options)),
+                        format_func=lambda i: display_options[i],
+                        key="del_single_sel",
+                    )
+                    chosen_row = comm_subs.iloc[chosen_idx]
+                    if st.button("מחקי הזנה זו", key="del_single_btn"):
+                        ok = delete_single_submission(
+                            str(chosen_row["committee_id"]),
+                            str(chosen_row["candidate_id"]),
+                            str(chosen_row["rater_name"]),
+                        )
+                        if ok:
+                            st.success("ההזנה נמחקה.")
+                            st.rerun()
+
+                # מחיקת הכל
+                st.markdown("---")
+                st.markdown("**מחיקת כל ההזנות לוועדה זו:**")
+                confirm = st.checkbox("כן, אני רוצה למחוק את כל ההזנות", key="del_all_confirm")
+                if confirm:
+                    if st.button("מחקי הכל", type="primary", key="del_all_btn"):
+                        n = delete_submissions_for_committee(str(committee_id))
+                        st.success(f"נמחקו {n} הזנות.")
+                        st.rerun()
 
 
 # ── לשונית ייצוא ────────────────────────────────────────
@@ -923,7 +1282,11 @@ def main():
 
     # ניווט בסרגל הצד
     with st.sidebar:
-        st.markdown("## תפריט")
+        try:
+            st.image("images.png", width=140)
+        except Exception:
+            pass
+        st.markdown("---")
         page = st.radio(
             "מסך",
             ["הזנת הערכה", "תוצאות ודירוג"],
