@@ -319,9 +319,8 @@ def _option_to_int(s) -> int:
 
 
 # ══════════════════════════════════════════════════════════
-#  חיבור ל-Google Sheets
+#  חיבור ל-Google Sheets  (ללא cache_resource — מניעת segfault)
 # ══════════════════════════════════════════════════════════
-@st.cache_resource
 def _get_gc():
     creds = Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]),
@@ -333,13 +332,11 @@ def _get_gc():
     return gspread.authorize(creds)
 
 
-@st.cache_resource
 def _get_spreadsheet():
     gc = _get_gc()
     return gc.open_by_key(st.secrets["sheet_id"])
 
 
-@st.cache_resource
 def _get_drive_service():
     creds = Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]),
@@ -1041,9 +1038,17 @@ def _tab_card(candidates: pd.DataFrame, submissions: pd.DataFrame):
 # ── לשונית ניהול ────────────────────────────────────────
 def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, committee_id: str):
     st.subheader("ניהול")
-    tab_c, tab_k, tab_del = st.tabs(["ועדות", "מועמדים", "מחיקת הזנות"])
 
-    with tab_c:
+    mgmt_section = st.radio(
+        "נושא ניהול",
+        ["ועדות", "מועמדים", "מחיקת הזנות"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="mgmt_nav",
+    )
+    st.markdown("---")
+
+    if mgmt_section == "ועדות":
         st.markdown("#### יצירת ועדה חדשה")
         with st.form("form_new_comm"):
             new_name = st.text_input("שם הוועדה")
@@ -1077,7 +1082,6 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
                     if st.button("ערכי", key=f"edit_btn_{cid}"):
                         st.session_state[f"editing_{cid}"] = True
 
-                # טופס עריכה — נפתח בלחיצה
                 if st.session_state.get(f"editing_{cid}"):
                     with st.form(f"edit_form_{cid}"):
                         st.markdown(f"**עריכת ועדה:** {comm['name']}")
@@ -1100,10 +1104,12 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
                             if st.form_submit_button("בטלי"):
                                 st.session_state[f"editing_{cid}"] = False
                                 st.rerun()
+        else:
+            st.info("אין ועדות עדיין.")
 
-    with tab_k:
+    elif mgmt_section == "מועמדים":
         if not committee_id:
-            st.info("בחרי ועדה תחילה.")
+            st.info("בחרי ועדה תחילה מהרשימה למעלה.")
         else:
             st.markdown("#### הוספת מועמד לוועדה הנוכחית")
             with st.form("form_new_cand"):
@@ -1131,7 +1137,7 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
                                     st.warning(f"התמונה לא הועלתה: {e}")
                         cid = add_candidate(committee_id, cand_name.strip(), photo_url)
                         if cid:
-                            st.success(f"מועמד נוסף{'עם תמונה' if photo_url else ''} ✓")
+                            st.success(f"מועמד נוסף {'עם תמונה' if photo_url else ''} ✓")
                             _clear_caches()
                             st.rerun()
                     else:
@@ -1142,6 +1148,8 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
             all_cands = load_candidates()
             if not all_cands.empty:
                 in_comm = all_cands[all_cands["committee_id"] == str(committee_id)]
+                if in_comm.empty:
+                    st.info("אין מועמדים בוועדה זו עדיין.")
                 for _, cand in in_comm.iterrows():
                     c1, c2 = st.columns([5, 1])
                     with c1:
@@ -1159,9 +1167,9 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
                                 _clear_caches()
                                 st.rerun()
 
-    with tab_del:
+    else:  # מחיקת הזנות
         if not committee_id:
-            st.info("בחרי ועדה תחילה.")
+            st.info("בחרי ועדה תחילה מהרשימה למעלה.")
         else:
             st.markdown("#### מחיקת הזנות")
             subs = load_submissions()
@@ -1176,7 +1184,6 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
             else:
                 st.markdown(f"סה\"כ הזנות בוועדה: **{len(comm_subs)}**")
 
-                # מחיקת הזנה בודדת
                 st.markdown("---")
                 st.markdown("**מחיקת הזנה בודדת:**")
                 if not all_cands.empty:
@@ -1206,7 +1213,6 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
                             st.success("ההזנה נמחקה.")
                             st.rerun()
 
-                # מחיקת הכל
                 st.markdown("---")
                 st.markdown("**מחיקת כל ההזנות לוועדה זו:**")
                 confirm = st.checkbox("כן, אני רוצה למחוק את כל ההזנות", key="del_all_confirm")
