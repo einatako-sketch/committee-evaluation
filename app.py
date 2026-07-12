@@ -7,6 +7,7 @@ import pandas as pd
 from datetime import datetime
 import uuid
 import re
+import traceback
 
 # ══════════════════════════════════════════════════════════
 #  עיצוב RTL + CSS
@@ -1103,67 +1104,66 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
     with tab_k:
         if not committee_id:
             st.info("בחרי ועדה תחילה.")
-            return
+        else:
+            st.markdown("#### הוספת מועמד לוועדה הנוכחית")
+            with st.form("form_new_cand"):
+                cand_name    = st.text_input("שם מלא")
+                uploaded_img = st.file_uploader(
+                    "תמונת מועמד (אופציונלי)",
+                    type=["png", "jpg", "jpeg"],
+                    help="גררי קובץ או לחצי לבחירה",
+                )
+                if uploaded_img:
+                    st.image(uploaded_img, width=120, caption="תצוגה מקדימה")
 
-        st.markdown("#### הוספת מועמד לוועדה הנוכחית")
-        with st.form("form_new_cand"):
-            cand_name    = st.text_input("שם מלא")
-            uploaded_img = st.file_uploader(
-                "תמונת מועמד (אופציונלי)",
-                type=["png", "jpg", "jpeg"],
-                help="גררי קובץ או לחצי לבחירה",
-            )
-            if uploaded_img:
-                st.image(uploaded_img, width=120, caption="תצוגה מקדימה")
-
-            if st.form_submit_button("הוסיפי מועמד"):
-                if cand_name.strip():
-                    photo_url = ""
-                    if uploaded_img:
-                        with st.spinner("מעלה תמונה..."):
-                            try:
-                                photo_url = upload_photo_to_drive(
-                                    uploaded_img.read(),
-                                    uploaded_img.name,
-                                    uploaded_img.type,
-                                )
-                            except Exception as e:
-                                st.warning(f"התמונה לא הועלתה: {e}")
-                    cid = add_candidate(committee_id, cand_name.strip(), photo_url)
-                    if cid:
-                        st.success(f"מועמד נוסף{'עם תמונה' if photo_url else ''} ✓")
-                        _clear_caches()
-                        st.rerun()
-                else:
-                    st.error("יש להכניס שם מועמד.")
-
-        st.markdown("---")
-        st.markdown("#### מועמדים בוועדה")
-        all_cands = load_candidates()
-        if not all_cands.empty:
-            in_comm = all_cands[all_cands["committee_id"] == str(committee_id)]
-            for _, cand in in_comm.iterrows():
-                c1, c2 = st.columns([5, 1])
-                with c1:
-                    icon = "✓" if cand["active"] else "✗ מושבת"
-                    st.markdown(f"{cand['name']}  {icon}")
-                with c2:
-                    if cand["active"]:
-                        if st.button("השבת", key=f"deact_{cand['candidate_id']}"):
-                            set_candidate_active(cand["candidate_id"], False)
+                if st.form_submit_button("הוסיפי מועמד"):
+                    if cand_name.strip():
+                        photo_url = ""
+                        if uploaded_img:
+                            with st.spinner("מעלה תמונה..."):
+                                try:
+                                    photo_url = upload_photo_to_drive(
+                                        uploaded_img.read(),
+                                        uploaded_img.name,
+                                        uploaded_img.type,
+                                    )
+                                except Exception as e:
+                                    st.warning(f"התמונה לא הועלתה: {e}")
+                        cid = add_candidate(committee_id, cand_name.strip(), photo_url)
+                        if cid:
+                            st.success(f"מועמד נוסף{'עם תמונה' if photo_url else ''} ✓")
                             _clear_caches()
                             st.rerun()
                     else:
-                        if st.button("הפעל", key=f"act_{cand['candidate_id']}"):
-                            set_candidate_active(cand["candidate_id"], True)
-                            _clear_caches()
-                            st.rerun()
+                        st.error("יש להכניס שם מועמד.")
+
+            st.markdown("---")
+            st.markdown("#### מועמדים בוועדה")
+            all_cands = load_candidates()
+            if not all_cands.empty:
+                in_comm = all_cands[all_cands["committee_id"] == str(committee_id)]
+                for _, cand in in_comm.iterrows():
+                    c1, c2 = st.columns([5, 1])
+                    with c1:
+                        icon = "✓" if cand["active"] else "✗ מושבת"
+                        st.markdown(f"{cand['name']}  {icon}")
+                    with c2:
+                        if cand["active"]:
+                            if st.button("השבת", key=f"deact_{cand['candidate_id']}"):
+                                set_candidate_active(cand["candidate_id"], False)
+                                _clear_caches()
+                                st.rerun()
+                        else:
+                            if st.button("הפעל", key=f"act_{cand['candidate_id']}"):
+                                set_candidate_active(cand["candidate_id"], True)
+                                _clear_caches()
+                                st.rerun()
 
     with tab_del:
-        st.markdown("#### מחיקת הזנות")
         if not committee_id:
             st.info("בחרי ועדה תחילה.")
         else:
+            st.markdown("#### מחיקת הזנות")
             subs = load_submissions()
             comm_subs = (
                 subs[subs["committee_id"] == str(committee_id)]
@@ -1295,9 +1295,19 @@ def main():
         )
 
     if page == "הזנת הערכה":
-        page_entry()
+        try:
+            page_entry()
+        except Exception as e:
+            st.error(f"שגיאה בדף ההזנה: {e}")
+            with st.expander("פרטים טכניים (לצוות הפיתוח)"):
+                st.code(traceback.format_exc())
     else:
-        page_results()
+        try:
+            page_results()
+        except Exception as e:
+            st.error(f"שגיאה בדף התוצאות: {e}")
+            with st.expander("פרטים טכניים (לצוות הפיתוח)"):
+                st.code(traceback.format_exc())
 
 
 if __name__ == "__main__":
