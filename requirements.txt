@@ -2,5 +2,4 @@ streamlit==1.45.1
 gspread==6.1.2
 google-auth==2.35.0
 pandas==2.2.3
-cffi>=1.12,<2.0
 rpds-py<2026
