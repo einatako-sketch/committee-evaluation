@@ -322,19 +322,36 @@ def _option_to_int(s) -> int:
 #  חיבור ל-Google Sheets  (ללא cache_resource — מניעת segfault)
 # ══════════════════════════════════════════════════════════
 def _get_gc():
+    print("DEBUG _get_gc: creating credentials...")
+    info = dict(st.secrets["gcp_service_account"])
+    print(f"DEBUG _get_gc: project_id={info.get('project_id','?')}")
     creds = Credentials.from_service_account_info(
-        dict(st.secrets["gcp_service_account"]),
+        info,
         scopes=[
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
         ],
     )
-    return gspread.authorize(creds)
+    print("DEBUG _get_gc: credentials created, calling service_account_from_dict...")
+    gc = gspread.service_account_from_dict(
+        info,
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ],
+    )
+    print("DEBUG _get_gc: gc created OK")
+    return gc
 
 
 def _get_spreadsheet():
+    print("DEBUG _get_spreadsheet: opening spreadsheet...")
     gc = _get_gc()
-    return gc.open_by_key(st.secrets["sheet_id"])
+    sheet_id = st.secrets["sheet_id"]
+    print(f"DEBUG _get_spreadsheet: sheet_id={sheet_id[:8]}...")
+    sp = gc.open_by_key(sheet_id)
+    print("DEBUG _get_spreadsheet: spreadsheet opened OK")
+    return sp
 
 
 def _get_drive_service():
@@ -848,9 +865,15 @@ def page_results():
         st.rerun()
 
     # טעינת נתונים
+    print("DEBUG page_results: loading committees...")
     committees = load_committees()
+    print(f"DEBUG page_results: committees loaded, rows={len(committees)}")
+    print("DEBUG page_results: loading candidates...")
     candidates = load_candidates()
+    print(f"DEBUG page_results: candidates loaded, rows={len(candidates)}")
+    print("DEBUG page_results: loading submissions...")
     submissions = load_submissions()
+    print(f"DEBUG page_results: submissions loaded, rows={len(submissions)}")
 
     if committees.empty:
         st.info("אין ועדות במערכת — צרי אחת בלשונית ניהול.")
