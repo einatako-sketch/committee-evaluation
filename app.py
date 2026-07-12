@@ -1,8 +1,6 @@
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaInMemoryUpload
 import pandas as pd
 from datetime import datetime
 import uuid
@@ -322,60 +320,21 @@ def _option_to_int(s) -> int:
 #  חיבור ל-Google Sheets  (ללא cache_resource — מניעת segfault)
 # ══════════════════════════════════════════════════════════
 def _get_gc():
-    print("DEBUG _get_gc: creating credentials...")
     info = dict(st.secrets["gcp_service_account"])
-    print(f"DEBUG _get_gc: project_id={info.get('project_id','?')}")
-    creds = Credentials.from_service_account_info(
+    return gspread.service_account_from_dict(
         info,
         scopes=[
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive",
         ],
     )
-    print("DEBUG _get_gc: credentials created, calling service_account_from_dict...")
-    gc = gspread.service_account_from_dict(
-        info,
-        scopes=[
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ],
-    )
-    print("DEBUG _get_gc: gc created OK")
-    return gc
 
 
 def _get_spreadsheet():
-    print("DEBUG _get_spreadsheet: opening spreadsheet...")
     gc = _get_gc()
-    sheet_id = st.secrets["sheet_id"]
-    print(f"DEBUG _get_spreadsheet: sheet_id={sheet_id[:8]}...")
-    sp = gc.open_by_key(sheet_id)
-    print("DEBUG _get_spreadsheet: spreadsheet opened OK")
-    return sp
+    return gc.open_by_key(st.secrets["sheet_id"])
 
 
-def _get_drive_service():
-    creds = Credentials.from_service_account_info(
-        dict(st.secrets["gcp_service_account"]),
-        scopes=["https://www.googleapis.com/auth/drive"],
-    )
-    return build("drive", "v3", credentials=creds)
-
-
-def upload_photo_to_drive(file_bytes: bytes, filename: str, mime_type: str) -> str:
-    """מעלה תמונה ל-Drive ומחזירה URL ישיר לתצוגה."""
-    service = _get_drive_service()
-    media = MediaInMemoryUpload(file_bytes, mimetype=mime_type, resumable=False)
-    file_meta = {"name": filename}
-    uploaded = service.files().create(
-        body=file_meta, media_body=media, fields="id"
-    ).execute()
-    file_id = uploaded.get("id")
-    service.permissions().create(
-        fileId=file_id,
-        body={"type": "anyone", "role": "reader"},
-    ).execute()
-    return f"https://drive.google.com/uc?export=view&id={file_id}"
 
 
 def _spreadsheet():
@@ -865,15 +824,9 @@ def page_results():
         st.rerun()
 
     # טעינת נתונים
-    print("DEBUG page_results: loading committees...")
     committees = load_committees()
-    print(f"DEBUG page_results: committees loaded, rows={len(committees)}")
-    print("DEBUG page_results: loading candidates...")
     candidates = load_candidates()
-    print(f"DEBUG page_results: candidates loaded, rows={len(candidates)}")
-    print("DEBUG page_results: loading submissions...")
     submissions = load_submissions()
-    print(f"DEBUG page_results: submissions loaded, rows={len(submissions)}")
 
     if committees.empty:
         st.info("אין ועדות במערכת — צרי אחת בלשונית ניהול.")
@@ -1136,31 +1089,17 @@ def _tab_management(committees: pd.DataFrame, comm_candidates: pd.DataFrame, com
         else:
             st.markdown("#### הוספת מועמד לוועדה הנוכחית")
             with st.form("form_new_cand"):
-                cand_name    = st.text_input("שם מלא")
-                uploaded_img = st.file_uploader(
-                    "תמונת מועמד (אופציונלי)",
-                    type=["png", "jpg", "jpeg"],
-                    help="גררי קובץ או לחצי לבחירה",
+                cand_name = st.text_input("שם מלא")
+                photo_url_input = st.text_input(
+                    "קישור תמונה מ-Google Drive (אופציונלי)",
+                    placeholder="הדביקי קישור שיתוף מ-Google Drive",
+                    help="העלי תמונה ל-Google Drive, לחצי שיתוף → העתיקי קישור, הדביקי כאן",
                 )
-                if uploaded_img:
-                    st.image(uploaded_img, width=120, caption="תצוגה מקדימה")
-
                 if st.form_submit_button("הוסיפי מועמד"):
                     if cand_name.strip():
-                        photo_url = ""
-                        if uploaded_img:
-                            with st.spinner("מעלה תמונה..."):
-                                try:
-                                    photo_url = upload_photo_to_drive(
-                                        uploaded_img.read(),
-                                        uploaded_img.name,
-                                        uploaded_img.type,
-                                    )
-                                except Exception as e:
-                                    st.warning(f"התמונה לא הועלתה: {e}")
-                        cid = add_candidate(committee_id, cand_name.strip(), photo_url)
+                        cid = add_candidate(committee_id, cand_name.strip(), photo_url_input.strip())
                         if cid:
-                            st.success(f"מועמד נוסף {'עם תמונה' if photo_url else ''} ✓")
+                            st.success("מועמד נוסף ✓")
                             _clear_caches()
                             st.rerun()
                     else:
